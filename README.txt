@@ -20,3 +20,9 @@ A smart, cloud-hosted Discord bot designed to bridge the gap for long-distance c
 * `main.py`: Core bot logic, event loops, and command handling.
 * `ai_manager.py`: Interface with Google Gemini API for content generation.
 * `database.py`: PostgreSQL connection handling and CRUD operations.
+
+## 💽 Database Setup
+This bot requires a PostgreSQL database.
+1. **Heroku:** Simply add the Postgres add-on (`heroku addons:create heroku-postgresql`). The bot detects the `DATABASE_URL` automatically.
+2. **Local:** Create a Postgres database and add the connection string to your `.env` file as `DATABASE_URL`.
+3. **Initialization:** The bot automatically creates all necessary tables (`users`, `dares`, `wiki`, etc.) on the first run.
