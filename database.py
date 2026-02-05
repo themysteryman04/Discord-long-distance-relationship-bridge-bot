@@ -263,6 +263,26 @@ async def get_random_moment():
     finally:
         conn.close()
 
+async def get_all_moments():
+    """Returns all moments sorted by timestamp (newest first). Includes source (SNAP/LOG)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id, caption, attachment_data, timestamp, source FROM moments ORDER BY timestamp DESC")
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+async def get_moment_by_caption(caption):
+    """Search for a moment by caption (case-insensitive)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id, caption, attachment_data, timestamp, source FROM moments WHERE LOWER(caption) LIKE LOWER(%s)", (f"%{caption}%",))
+            return cur.fetchone()
+    finally:
+        conn.close()
+
 # --- AUDIO CAPSULE FUNCTIONs ---
 async def add_capsule(sender_id, url, label, deliver_at, status):
     conn = get_connection()

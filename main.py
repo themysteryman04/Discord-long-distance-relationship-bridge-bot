@@ -1,14 +1,13 @@
 import discord
 from discord.ext import commands
 import os
-# import aiosqlite  <-- REMOVED (Not compatible with Heroku/Postgres)
 from dotenv import load_dotenv
 import config
 import database
 import datetime
 import random
 import asyncio
-import subprocess  # <-- ADDED (For running backup commands)
+import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import ai_manager 
 from zoneinfo import ZoneInfo
@@ -133,7 +132,12 @@ async def send_daily_question():
     malaysia_time = datetime.datetime.now(ZoneInfo("Asia/Kuala_Lumpur"))
     q_id = malaysia_time.strftime("%Y-%m-%d_%H-%M-%S")
     
-    question_text = await ai_manager.get_ai_question()
+    # Updated to handle potential AI errors gracefully
+    try:
+        question_text = await ai_manager.get_ai_question()
+    except Exception as e:
+        print(f"Daily Question Error: {e}")
+        question_text = "**What is one thing you are grateful for today?**"
 
     embed = discord.Embed(
         title="💖 Daily Question", 
@@ -515,21 +519,17 @@ async def send_shop_menu(channel):
 @bot.command()
 async def shop(ctx):
     """Resets the shop menu. Run this inside the shop channel."""
-    # 1. Enforce Channel (Using 'shop' key now)
     target_id = config.CHANNELS.get("shop")
-    
     if ctx.channel.id != target_id:
-        # Optional: Tell them where to go
         return
 
-    # 2. Purge old messages to keep it clean
-    await ctx.channel.purge(limit=10)
+    # Purge old messages to keep it clean
+    try:
+        await ctx.channel.purge(limit=10)
+    except:
+        pass
     
-    # 3. Send the permanent menu
     await send_shop_menu(ctx.channel)
-    
-    # 4. Do not delete the user's command if purge missed it, 
-    # but purge usually catches it.
 
 # =========================================
 # 8. WIKI OF US (Memory System)
@@ -537,11 +537,16 @@ async def shop(ctx):
 
 @bot.command()
 async def remember(ctx, key: str, *, value: str = None):
+    # Check if in wiki channel
+    wiki_channel_id = config.CHANNELS.get("wiki_of_us")
+    if ctx.channel.id != wiki_channel_id:
+        await ctx.send(f"❌ This command only works in <#{wiki_channel_id}>")
+        return
+    
     # 1. Check for attachments
     attachment_data = None
     if ctx.message.attachments:
         # Store "ChannelID|MessageID"
-        # We MUST keep the original message. If you delete it, the image dies.
         attachment_data = f"{ctx.channel.id}|{ctx.message.id}"
 
     if value:
@@ -560,64 +565,148 @@ async def remember(ctx, key: str, *, value: str = None):
 
 @bot.command()
 async def wiki(ctx):
-    """Shows a list of everything the bot remembers."""
-    keys = await database.get_all_wiki_keys()
+    """Shows a unified list of all memories: wiki entries, snaps, and logs."""
+    # Check if in wiki channel
+    wiki_channel_id = config.CHANNELS.get("wiki_of_us")
+    if ctx.channel.id != wiki_channel_id:
+        await ctx.send(f"❌ This command only works in <#{wiki_channel_id}>")
+        return
     
-    if not keys:
-        await ctx.send("The Wiki is empty! Use `!remember \"key\" \"value\"` to add something.")
+    keys = await database.get_all_wiki_keys()
+    moments = await database.get_all_moments()
+    
+    if not keys and not moments:
+        await ctx.send("The Wiki is empty! Use `!remember \"key\" \"value\"` to add something or `!snap`/`!log` to capture moments.")
         return
 
-    # Format the list nicely
-    key_list_str = "\n".join([f"• **{key.title()}**" for key in keys])
+    # Create unified list
+    all_items = []
     
+    # Add wiki entries
+    for key in keys:
+        all_items.append(("📝", key, "memory"))
+    
+    # Add moments
+    for user_id, caption, _, timestamp, source in moments:
+        source_emoji = "⚡" if source == "SNAP" else "📝"
+        all_items.append((source_emoji, caption, "moment"))
+    
+    # Sort by type then alphabetically
+    all_items.sort(key=lambda x: (x[2], x[1]))
+    
+    # Build embed with paginated list
     embed = discord.Embed(
-        title="📚 The Wiki of Us",
-        description=f"Type `!get <name>` to see details.\n\n{key_list_str}",
+        title="📚 The Wiki of Us - Complete Index",
+        description=f"**Total items:** {len(all_items)} (Memories + Moments)\n\nUse `!get <name or caption>` to view details.",
         color=discord.Color.blue()
     )
+    
+    # Create list string
+    list_str = ""
+    for emoji, name, item_type in all_items:
+        list_str += f"{emoji} **{name}**\n"
+    
+    # If list is too long, truncate
+    if len(list_str) > 1024:
+        list_str = list_str[:1000] + "\n*...and more*"
+    
+    embed.add_field(
+        name="All Memories & Moments",
+        value=list_str if list_str else "*(empty)*",
+        inline=False
+    )
+    
     await ctx.send(embed=embed)
 
 @bot.command()
 async def get(ctx, *, key: str):
-    search_key = key.strip('"').strip("'").lower()
-    entry = await database.get_wiki_entry(search_key)
-    
-    if not entry:
-        await ctx.send(f"❌ Record not found: **{search_key}**")
+    # Check if in wiki channel
+    wiki_channel_id = config.CHANNELS.get("wiki_of_us")
+    if ctx.channel.id != wiki_channel_id:
+        await ctx.send(f"❌ This command only works in <#{wiki_channel_id}>")
         return
-
-    content, attachment_data = entry
-    image_url = None
-
-    # 3. Dynamic Refresh Logic
-    if attachment_data:
-        try:
-            c_id, m_id = attachment_data.split('|')
-            channel = bot.get_channel(int(c_id))
-            if channel:
-                msg = await channel.fetch_message(int(m_id))
-                if msg.attachments:
-                    # This generates a BRAND NEW valid link
-                    image_url = msg.attachments[0].url
-        except Exception:
-            image_url = None # Original message might have been deleted
-
-    embed = discord.Embed(
-        title=search_key.title(),
-        description=content if content else "",
-        color=discord.Color.green()
-    )
     
-    if image_url:
-        embed.set_image(url=image_url)
-    elif attachment_data: 
-        embed.set_footer(text="⚠️ Image not found (Original message was deleted?)")
+    search_key = key.strip('"').strip("'").lower()
+    
+    # First, try to find a wiki entry
+    wiki_entry = await database.get_wiki_entry(search_key)
+    
+    if wiki_entry:
+        # Found a wiki entry
+        content, attachment_data = wiki_entry
+        image_url = None
 
-    try:
-        await ctx.author.send(embed=embed)
-        await ctx.message.add_reaction("📩")
-    except discord.Forbidden:
-        await ctx.send("❌ Enable DMs!")
+        # Dynamic Refresh Logic for wiki attachments
+        if attachment_data:
+            try:
+                c_id, m_id = attachment_data.split('|')
+                channel = bot.get_channel(int(c_id))
+                if channel:
+                    msg = await channel.fetch_message(int(m_id))
+                    if msg.attachments:
+                        image_url = msg.attachments[0].url
+            except Exception:
+                image_url = None
+
+        embed = discord.Embed(
+            title=f"📝 {search_key.title()}",
+            description=content if content else "",
+            color=discord.Color.green()
+        )
+        
+        if image_url:
+            embed.set_image(url=image_url)
+        elif attachment_data: 
+            embed.set_footer(text="⚠️ Image not found (Original message was deleted?)")
+
+        try:
+            await ctx.author.send(embed=embed)
+            await ctx.message.add_reaction("📩")
+        except discord.Forbidden:
+            await ctx.send("❌ Enable DMs!")
+        return
+    
+    # If no wiki entry, try to find a moment by caption
+    moment = await database.get_moment_by_caption(search_key)
+    
+    if moment:
+        # Found a moment
+        user_id, caption, attachment_data, timestamp, source = moment
+        image_url = None
+        
+        # Get image URL for moment
+        if attachment_data:
+            try:
+                c_id, m_id = attachment_data.split('|')
+                channel = bot.get_channel(int(c_id))
+                if channel:
+                    msg = await channel.fetch_message(int(m_id))
+                    if msg.attachments:
+                        image_url = msg.attachments[0].url
+            except Exception:
+                image_url = None
+        
+        source_label = "⚡ SNAP CHALLENGE" if source == "SNAP" else "📝 MANUAL LOG"
+        embed = discord.Embed(
+            title=f"📸 {caption}",
+            description=f"**Type:** {source_label}\n📅 {timestamp}\n👤 <@{user_id}>",
+            color=discord.Color.purple()
+        )
+        
+        if image_url:
+            embed.set_image(url=image_url)
+        else:
+            embed.set_footer(text="⚠️ Image not found (Original message was deleted?)")
+        
+        try:
+            await ctx.author.send(embed=embed)
+            await ctx.message.add_reaction("📸")
+        except discord.Forbidden:
+            await ctx.send("❌ Enable DMs!")
+        return
+    
+    # Not found in either wiki or moments
+    await ctx.send(f"❌ Not found: **{search_key}**\n\nSearches both wiki entries and moment captions.")
 
 
 # =========================================
@@ -726,7 +815,13 @@ class DarePendingView(discord.ui.View):
 @bot.command()
 async def dare(ctx):
     """Manually start a dare for your partner."""
-    task, price = await ai_manager.get_ai_dare()
+    # Modified to catch AI errors without crashing
+    try:
+        task, price = await ai_manager.get_ai_dare()
+    except Exception as e:
+        print(f"Manual Dare Error: {e}")
+        task, price = "Hold a plank for 45 seconds.", 30
+
     dare_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     
     await database.create_dare(dare_id, ctx.author.id, task, price)
@@ -775,7 +870,7 @@ async def save_moment_logic(ctx, caption, source, reward):
     """
     if not ctx.message.attachments:
         await ctx.send("❌ You forgot the photo! Attach an image to your command.")
-        return False  # <--- Return False so we know it failed
+        return False
 
     # Save Data
     attachment_data = f"{ctx.channel.id}|{ctx.message.id}"
@@ -793,7 +888,7 @@ async def save_moment_logic(ctx, caption, source, reward):
         embed.color = discord.Color.gold()
         
     await ctx.send(embed=embed)
-    return True # <--- Return True if success
+    return True
 
 @bot.command()
 async def snap(ctx, *, caption: str = "Just vibing"):
@@ -857,6 +952,100 @@ async def flashback(ctx):
         embed.set_footer(text="⚠️ Image lost (Message deleted?)")
         
     await ctx.send(embed=embed)
+
+@bot.command()
+async def moments(ctx):
+    """Browse all captured moments from snaps and logs."""
+    # Check if in wiki channel
+    wiki_channel_id = config.CHANNELS.get("wiki_of_us")
+    if ctx.channel.id != wiki_channel_id:
+        await ctx.send(f"❌ This command only works in <#{wiki_channel_id}>")
+        return
+    
+    all_moments = await database.get_all_moments()
+    
+    if not all_moments:
+        await ctx.send("📭 No captured moments yet! Use `!snap` or `!log` to start capturing memories.")
+        return
+    
+    # Create a paginated view (show 3 moments per page with full details)
+    moments_per_page = 3
+    total_pages = (len(all_moments) + moments_per_page - 1) // moments_per_page
+    
+    class MomentsView(discord.ui.View):
+        def __init__(self, moments_list, page=0):
+            super().__init__()
+            self.moments_list = moments_list
+            self.current_page = page
+            self.total_pages = (len(moments_list) + moments_per_page - 1) // moments_per_page
+            self.update_buttons()
+        
+        def update_buttons(self):
+            self.prev_button.disabled = self.current_page == 0
+            self.next_button.disabled = self.current_page >= self.total_pages - 1
+        
+        @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.blurple)
+        async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if self.current_page > 0:
+                self.current_page -= 1
+                self.update_buttons()
+                await self.show_page(interaction)
+        
+        @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.blurple)
+        async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if self.current_page < self.total_pages - 1:
+                self.current_page += 1
+                self.update_buttons()
+                await self.show_page(interaction)
+        
+        async def show_page(self, interaction: discord.Interaction):
+            start_idx = self.current_page * moments_per_page
+            end_idx = min(start_idx + moments_per_page, len(self.moments_list))
+            page_moments = self.moments_list[start_idx:end_idx]
+            
+            embed = discord.Embed(
+                title="📸 All Captured Moments",
+                description=f"Page {self.current_page + 1} of {self.total_pages} • Total: {len(self.moments_list)} moments",
+                color=discord.Color.purple()
+            )
+            
+            for i, moment in enumerate(page_moments, start=start_idx + 1):
+                user_id, caption, attachment_data, timestamp, source = moment
+                
+                source_emoji = "⚡ SNAP CHALLENGE" if source == "SNAP" else "📝 MANUAL LOG"
+                moment_info = f"**Type:** {source_emoji}\n📅 **{timestamp}**\n👤 <@{user_id}>"
+                embed.add_field(
+                    name=f"✨ {caption}",
+                    value=moment_info,
+                    inline=False
+                )
+            
+            await interaction.response.edit_message(embed=embed, view=self)
+    
+    # Show first page
+    view = MomentsView(all_moments)
+    start_idx = 0
+    end_idx = min(moments_per_page, len(all_moments))
+    page_moments = all_moments[start_idx:end_idx]
+    
+    embed = discord.Embed(
+        title="📸 All Captured Moments",
+        description=f"Page 1 of {total_pages} • Total: {len(all_moments)} moments",
+        color=discord.Color.purple()
+    )
+    
+    for i, moment in enumerate(page_moments, start=1):
+        user_id, caption, attachment_data, timestamp, source = moment
+        
+        source_emoji = "⚡ SNAP CHALLENGE" if source == "SNAP" else "📝 MANUAL LOG"
+        moment_info = f"**Type:** {source_emoji}\n📅 **{timestamp}**\n👤 <@{user_id}>"
+        embed.add_field(
+            name=f"✨ {caption}",
+            value=moment_info,
+            inline=False
+        )
+    
+    await ctx.send(embed=embed, view=view)
 
 
 # =========================================
@@ -1054,96 +1243,104 @@ async def on_message(message):
 # =========================================
 # 12. LIVE DASHBOARD (The Stats Board)
 # =========================================
-from discord.ext import tasks
 
-@tasks.loop(minutes=1) # <--- UPDATED TO 1 MINUTE
+@tasks.loop(minutes=1) 
 async def update_dashboard():
-    """Updates the pinned stats board every 30 mins."""
+    """Updates the pinned stats board every 1 min."""
     channel_id = config.CHANNELS.get("live_stats")
-    channel = bot.get_channel(channel_id)
     
+    # 1. Fetch channel safely
+    channel = bot.get_channel(channel_id)
     if not channel: return
 
-    # --- A. CLOCKS ---
-    # 1. Update your timezone (Malaysia)
-    tz_husb = ZoneInfo("Asia/Kuala_Lumpur") 
-    
-    # 2. Update HER timezone (Zambia uses 'Africa/Lusaka')
-    tz_wife = ZoneInfo("Africa/Lusaka") 
-    
-    time_husb = datetime.datetime.now(tz_husb).strftime("%I:%M %p")
-    time_wife = datetime.datetime.now(tz_wife).strftime("%I:%M %p")
-    
-    # --- B. COUNTERS ---
-    now = datetime.datetime.now()
+    # 2. Wrap the entire update logic in try/except to prevent 500 crashes
     try:
-        start_date = datetime.datetime.strptime(config.DATES["relationship_start"], "%Y-%m-%d")
-        days_together = (now - start_date).days
-    except:
-        days_together = "0"
+        # --- A. CLOCKS ---
+        tz_husb = ZoneInfo("Asia/Kuala_Lumpur") 
+        tz_wife = ZoneInfo("Africa/Lusaka") 
+        
+        time_husb = datetime.datetime.now(tz_husb).strftime("%I:%M %p")
+        time_wife = datetime.datetime.now(tz_wife).strftime("%I:%M %p")
+        
+        # --- B. COUNTERS ---
+        now = datetime.datetime.now()
+        try:
+            start_date = datetime.datetime.strptime(config.DATES["relationship_start"], "%Y-%m-%d")
+            days_together = (now - start_date).days
+        except:
+            days_together = "0"
 
-    try:
-        last_seen_date = datetime.datetime.strptime(config.DATES["last_seen"], "%Y-%m-%d")
-        days_apart = (now - last_seen_date).days
-    except:
-        days_apart = "0"
+        try:
+            last_seen_date = datetime.datetime.strptime(config.DATES["last_seen"], "%Y-%m-%d")
+            days_apart = (now - last_seen_date).days
+        except:
+            days_apart = "0"
 
-    # --- C. DATABASE STATS ---
-    today_str = datetime.datetime.now(tz_husb).strftime("%Y-%m-%d")
-    stats = await database.get_dashboard_stats(today_str)
+        # --- C. DATABASE STATS ---
+        today_str = datetime.datetime.now(tz_husb).strftime("%Y-%m-%d")
+        stats = await database.get_dashboard_stats(today_str)
 
-    # Format Question Status
-    q_count = stats['daily_q_count']
-    if q_count == 2:
-        q_status = "✅ Completed by both"
-    elif q_count == 1:
-        q_status = "⏳ Waiting for partner"
-    else:
-        q_status = "❌ Not started yet"
+        # Format Question Status
+        q_count = stats['daily_q_count']
+        if q_count == 2:
+            q_status = "✅ Completed by both"
+        elif q_count == 1:
+            q_status = "⏳ Waiting for partner"
+        else:
+            q_status = "❌ Not started yet"
 
-    # --- D. BUILD EMBED ---
-    embed = discord.Embed(title="📊 Relationship Control Center", color=discord.Color.dark_teal())
-    
-    # Row 1: Clocks (UPDATED FLAG HERE)
-    embed.add_field(name="🇲🇾 Husband", value=f"**{time_husb}**", inline=True)
-    embed.add_field(name="🇿🇲 Wife", value=f"**{time_wife}**", inline=True)
-    
-    # Row 2: The Counters
-    embed.add_field(
-        name="⏳ Timeline", 
-        value=f"❤️ **{days_together}** Days Together\n💔 **{days_apart}** Days Apart", 
-        inline=False
-    )
-    
-    # Row 3: Action Items
-    action_text = (
-        f"🔥 **{stats['active_dares']}** Active Dares\n"
-        f"📜 **{stats['open_bounties']}** Open Bounties\n"
-        f"❓ Daily Question: **{q_status}**"
-    )
-    embed.add_field(name="⚡ Pending Actions", value=action_text, inline=False)
+        # --- D. BUILD EMBED ---
+        embed = discord.Embed(title="📊 Relationship Control Center", color=discord.Color.dark_teal())
+        
+        # Row 1: Clocks
+        embed.add_field(name="🇲🇾 Husband", value=f"**{time_husb}**", inline=True)
+        embed.add_field(name="🇿🇲 Wife", value=f"**{time_wife}**", inline=True)
+        
+        # Row 2: The Counters
+        embed.add_field(
+            name="⏳ Timeline", 
+            value=f"❤️ **{days_together}** Days Together\n💔 **{days_apart}** Days Apart", 
+            inline=False
+        )
+        
+        # Row 3: Action Items
+        action_text = (
+            f"🔥 **{stats['active_dares']}** Active Dares\n"
+            f"📜 **{stats['open_bounties']}** Open Bounties\n"
+            f"❓ Daily Question: **{q_status}**"
+        )
+        embed.add_field(name="⚡ Pending Actions", value=action_text, inline=False)
 
-    # Row 4: Buried Treasure
-    embed.add_field(
-        name="🏴‍☠️ Buried Treasure", 
-        value=f"🎙️ **{stats['buried_capsules']}** Audio Capsules Hidden", 
-        inline=False
-    )
-    
-    embed.set_footer(text=f"Auto-updates every 1 min • Last: {datetime.datetime.now(tz_husb).strftime('%H:%M')}")
+        # Row 4: Buried Treasure
+        embed.add_field(
+            name="🏴‍☠️ Buried Treasure", 
+            value=f"🎙️ **{stats['buried_capsules']}** Audio Capsules Hidden", 
+            inline=False
+        )
+        
+        embed.set_footer(text=f"Auto-updates every 1 min • Last: {datetime.datetime.now(tz_husb).strftime('%H:%M')}")
 
-    # --- E. EDIT OR SEND ---
-    history = [msg async for msg in channel.history(limit=5)]
-    last_bot_msg = None
-    for msg in history:
-        if msg.author == bot.user:
-            last_bot_msg = msg
-            break
-            
-    if last_bot_msg:
-        await last_bot_msg.edit(content=None, embed=embed)
-    else:
-        await channel.send(embed=embed)
+        # --- E. EDIT OR SEND (Safely) ---
+        # We only try to read the last 5 messages to find the bot's own post
+        try:
+            history = [msg async for msg in channel.history(limit=5)]
+            last_bot_msg = None
+            for msg in history:
+                if msg.author == bot.user:
+                    last_bot_msg = msg
+                    break
+                    
+            if last_bot_msg:
+                await last_bot_msg.edit(content=None, embed=embed)
+            else:
+                await channel.send(embed=embed)
+        except Exception as e:
+            # If Discord 500s here, just skip this update
+            print(f"⚠️ Dashboard Discord Error: {e}")
+            pass
+
+    except Exception as e:
+        print(f"⚠️ Dashboard Logic Error: {e}")
 
 
 # =========================================
@@ -1216,26 +1413,18 @@ async def backup_database_job():
         return
 
     timestamp = datetime.datetime.now(ZoneInfo("Asia/Kuala_Lumpur")).strftime("%Y-%m-%d_%H-%M")
-    
-    # HEROKU SPECIFIC: We cannot read a local .db file.
-    # We must ask Heroku (via subprocess) to dump the DB to a temp file.
-    
-    # WARNING: This requires 'DATABASE_URL' to be set in your .env or Config Vars
     db_url = os.getenv("DATABASE_URL")
+    
     if not db_url:
         print("⚠️ Backup Failed: DATABASE_URL not found.")
         return
 
     print("⏳ Starting remote Postgres backup...")
     try:
-        # Use pg_dump (which is installed on Heroku)
-        # -F c : Custom format (compressed)
-        # -f : Output file
         filename = f"/tmp/backup_{timestamp}.dump"
         
         subprocess.run(f"pg_dump {db_url} -F c -f {filename}", shell=True, check=True)
         
-        # Check if file exists
         if os.path.exists(filename):
             file = discord.File(filename, filename=f"heroku_backup_{timestamp}.dump")
             
@@ -1269,13 +1458,11 @@ async def setup_start_menu():
     
     if not channel: return
 
-    # 1. Clear the channel (Keeps it clean)
     try:
         await channel.purge(limit=10)
     except:
-        pass # Fails if channel is too old, but usually fine for a menu channel
+        pass
 
-    # 2. Build the Embed
     embed = discord.Embed(
         title="🏠 Welcome to Our Digital Home",
         description=(
@@ -1297,8 +1484,8 @@ async def setup_start_menu():
             
             "**#moments (Our 'BeReal')**\n"
             "• **What:** Random pings 3x/day. 15 mins to reply with a photo.\n"
-            "• `!snap <caption>` → Reply to a challenge (attach photo).\n"
-            "• `!log <caption>` → Log a memory manually anytime.\n"
+            "• `!snap <caption>` → Reply to a challenge (attach photo). [⚡ SNAP CHALLENGE]\n"
+            "• `!log <caption>` → Log a memory manually anytime. [📝 MANUAL LOG]\n"
             "• `!flashback` → See a random photo from the past.\n\n"
             
             "**#audio-capsule (Time Travel Voice Notes)**\n"
@@ -1346,11 +1533,12 @@ async def setup_start_menu():
             "• `!date <vibe>` → Suggests 3 date ideas.\n"
             "• `!decide <Q> <Opt1> <Opt2>` → Runs a poll.\n\n"
             
-            "**#wiki-of-us**\n"
-            "• **What:** Permanent memory bank (passwords, IDs, inside jokes).\n"
-            "• `!remember \"<key>\" \"<value>\"` → Save text/photo.\n"
-            "• `!get <key>` → Retrieve info.\n"
-            "• `!wiki` → List all keys.\n\n"
+            "**#wiki-of-us (Shared Memory Bank)**\n"
+            "• **What:** Store & search all memories in one place.\n"
+            "• `!remember \"<key>\" \"<value>\"` → Save text or photo.\n"
+            "• `!get <key>` → Retrieve a specific memory.\n"
+            "• `!wiki` → List all memories + recent moments preview.\n"
+            "• `!moments` → Browse all captured SNAP & LOG moments with pagination.\n\n"
             
             "**#reminder-room**\n"
             "• **What:** Alarms that nag us (1h, 30m, 15m warnings).\n"
@@ -1379,8 +1567,13 @@ async def trigger_random_dare():
         print("⚠️ Scheduler Error: 'truth_or_dare' channel ID not found.")
         return
 
-    task, price = await ai_manager.get_ai_dare()
-    
+    # Critical fix: Try to get dare, fallback if AI crashes/times out
+    try:
+        task, price = await ai_manager.get_ai_dare()
+    except Exception as e:
+        print(f"⚠️ Scheduler AI Error: {e}")
+        task, price = "Send a voice note singing a song of your choice.", 50
+
     dare_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     await database.create_dare(dare_id, 0, task, price) 
     
@@ -1404,8 +1597,6 @@ async def schedule_todays_snaps():
 
     print("📅 Scheduling Daily Snaps (Multi-Timezone)...")
     
-    utc_now = datetime.datetime.now(datetime.timezone.utc)
-
     for player in config.PLAYERS:
         p_id = player["id"]
         p_tz_str = player["tz"]
@@ -1447,13 +1638,15 @@ async def schedule_todays_snaps():
 async def on_ready():
     print(f'✅ Logged in as {bot.user}')
     
-    # NOTE: You must update database.py to use Postgres!
+    # --- CRITICAL FIX: PREVENT DUPLICATE TASKS ON RECONNECT ---
+    # If the bot reconnects (common on Heroku), this prevents re-scheduling everything 50 times.
+    if hasattr(bot, 'tasks_initialized') and bot.tasks_initialized:
+        print("🔄 Reconnected (Skipping task setup)")
+        return
+
+    # --- INITIALIZATION START ---
     await database.init_db()
-    
-    # --- Register Persistent Views ---
     bot.add_view(ShopView())
-    
-    # --- Scheduler Setup ---
     bot.scheduler = AsyncIOScheduler()
     
     # 1. Daily Question (9 AM MYT)
@@ -1474,7 +1667,7 @@ async def on_ready():
         timezone=ZoneInfo("Asia/Kuala_Lumpur")
     )
 
-    # 3. Multi-Snap Planner (BeReal)
+    # 3. Multi-Snap Planner (BeReal) - Run once now, and schedule for future midnights
     await schedule_todays_snaps()
     bot.scheduler.add_job(
         schedule_todays_snaps, 
@@ -1496,13 +1689,10 @@ async def on_ready():
             
             now = datetime.datetime.now(ZoneInfo("Asia/Kuala_Lumpur"))
             
-            if deliver_time < now:
-                run_date = now + datetime.timedelta(seconds=10)
-                print(f"   -> Capsule {c_id} missed schedule. Sending NOW.")
-            else:
-                run_date = deliver_time
-                print(f"   -> Capsule {c_id} restored for {run_date}")
-                
+            # If missed, send in 10 seconds. If future, schedule normally.
+            run_date = max(now + datetime.timedelta(seconds=10), deliver_time)
+            
+            print(f"   -> Capsule {c_id} restored for {run_date}")
             bot.scheduler.add_job(
                 deliver_capsule_job, 
                 'date', 
@@ -1530,9 +1720,12 @@ async def on_ready():
     
     bot.scheduler.start()
     
+    # Mark tasks as initialized so we don't do this again until a hard restart
+    bot.tasks_initialized = True
+    
     debug_channel = bot.get_channel(config.CHANNELS.get("debug_logs"))
     if debug_channel:
-        await debug_channel.send(f"🤖 **EchoBot FINAL** | Manual Posted | Backups Active | Systems Nominal")
+        await debug_channel.send(f"🤖 **EchoBot REBOOTED** | Anti-Spam Active | Heartbeat Secured")
 
 @bot.command()
 async def test_q(ctx):
@@ -1554,8 +1747,6 @@ async def update(ctx):
     """Forces the dashboard to update immediately."""
     await update_dashboard()
     await ctx.send("✅ Dashboard updated!", delete_after=3)
-
-# --- NOTE: The 'backup' command is NOT here because it is already in Section 16 ---
 
 if __name__ == "__main__":
     if TOKEN:
