@@ -2,39 +2,39 @@
 
 CHANNELS = {
     # --- DASHBOARD ---
-    "start_here": 1460010749924741162,   # KEEP YOUR EXISTING ID
-    "live_stats": 1460010827653451928,
+    "start_here": 1234567890123456789,   # REPLACE WITH YOUR CHANNEL ID
+    "live_stats": 1234567890123456790,
 
     # --- CONNECTION ---
-    "daily_question": 1460011095040196721, # KEEP YOUR EXISTING ID
-    "moments": 1460011160052039813,
-    "audio_capsule": 1460011595475193937,
+    "daily_question": 1234567890123456791, # REPLACE WITH YOUR CHANNEL ID
+    "moments": 1234567890123456792,
+    "audio_capsule": 1234567890123456793,
 
     # --- UTILITY ---
-    "bounty_board": 1460011800085922036,  # <--- THIS IS OUR TARGET FOR TODAY
-    "dua_requests": 1460013258546348297,
-    "decision_room": 1460012745670791301,
-    "wiki_of_us": 1460012804265214235,
+    "bounty_board": 1234567890123456794,  # REPLACE WITH YOUR CHANNEL ID
+    "dua_requests": 1234567890123456795,
+    "decision_room": 1234567890123456796,
+    "wiki_of_us": 1234567890123456797,
 
     # --- ARCADE ---
-    "truth_or_dare": 1460012898586853667,
-    "shop": 1460013380298342483,
-    "watch_party": 1460013326800130088,
-    "digital_garden": 1460012974365212895,
+    "truth_or_dare": 1234567890123456798,
+    "shop": 1234567890123456799,
+    "watch_party": 1234567890123456800,
+    "digital_garden": 1234567890123456801,
 
     # --- BACKEND ---
-    "debug_logs": 1460012057180110959,    # KEEP YOUR EXISTING ID
-    "database_backup": 1460012158690791667
+    "debug_logs": 1234567890123456802,    # REPLACE WITH YOUR CHANNEL ID
+    "database_backup": 1234567890123456803
 }
 
 
 PLAYERS = [
     {
-        "id": 831165682959253564,     # <--- PASTE YOUR ID HERE
-        "tz": "Asia/Kuala_Lumpur"     # GMT+8
+        "id": 9876543210987654321,     # REPLACE WITH YOUR DISCORD USER ID
+        "tz": "Asia/Kuala_Lumpur"      # GMT+8
     },
     {
-        "id": 1459986292086407252,     # <--- PASTE HER ID HERE
+        "id": 9876543210987654322,     # REPLACE WITH YOUR PARTNER'S DISCORD USER ID
         "tz": "Africa/Harare"          # GMT+2 
     }
 ]
@@ -51,6 +51,6 @@ SHOP_ITEMS = {
 
 # STATS CONFIGURATION
 DATES = {
-    "relationship_start": "2025-12-27", # REPLACE with your Anniversary (YYYY-MM-DD)
-    "last_seen": "2025-12-15"           # REPLACE with last time you met (YYYY-MM-DD)
+    "relationship_start": "2024-01-15", # REPLACE with your Anniversary (YYYY-MM-DD)
+    "last_seen": "2024-12-20"           # REPLACE with last time you met (YYYY-MM-DD)
 }
