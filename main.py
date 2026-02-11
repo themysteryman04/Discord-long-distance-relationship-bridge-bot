@@ -101,13 +101,24 @@ class AnswerModal(discord.ui.Modal, title='Today\'s Question'):
         await self.view_instance.check_reveal(interaction.channel)
 
 class QuestionView(discord.ui.View):
-    def __init__(self, question_id):
+    def __init__(self, question_id=None):
         super().__init__(timeout=None)
         self.question_id = question_id
 
-    @discord.ui.button(label="✍️ Answer Secretly", style=discord.ButtonStyle.blurple, custom_id="ans_btn")
+    @discord.ui.button(label="✍️ Answer Secretly", style=discord.ButtonStyle.blurple)
     async def answer_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(AnswerModal(self.question_id, self))
+        # Extract question_id from message or use stored one
+        question_id = self.question_id
+        if not question_id and interaction.message:
+            # Try to extract from embed footer or message content
+            for embed in interaction.message.embeds:
+                if embed.footer and embed.footer.text:
+                    question_id = embed.footer.text.split("ID: ")[-1] if "ID: " in embed.footer.text else None
+        
+        if not question_id:
+            await interaction.response.send_message("❌ Question ID not found. Please try again.", ephemeral=True)
+            return
+        await interaction.response.send_modal(AnswerModal(question_id, self))
 
     async def check_reveal(self, channel):
         answers = await database.get_answers(self.question_id)
@@ -144,7 +155,7 @@ async def send_daily_question():
         description=question_text, 
         color=discord.Color.from_rgb(255, 105, 180)
     )
-    embed.set_footer(text="Both partners must answer to reveal.")
+    embed.set_footer(text=f"Both partners must answer to reveal. ID: {q_id}")
 
     await target_channel.send(embed=embed, view=QuestionView(q_id))
     print(f"✅ Daily Question posted for {q_id}")
@@ -1647,6 +1658,7 @@ async def on_ready():
     # --- INITIALIZATION START ---
     await database.init_db()
     bot.add_view(ShopView())
+    bot.add_view(QuestionView(None))  # Persistent view for daily questions
     bot.scheduler = AsyncIOScheduler()
     
     # 1. Daily Question (9 AM MYT)
