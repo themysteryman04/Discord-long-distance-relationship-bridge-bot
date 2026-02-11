@@ -2,6 +2,17 @@
 
 All notable changes to the Echo Bot will be documented in this file.
 
+## [v2.1.1] - 2026-02-12
+
+### Fixed
+- **Daily Question Button on Dyno Restart**: Fixed issue where the "Answer" button for daily questions stopped working after dyno restart
+  - Added `QuestionView` to persistent views in `on_ready()`
+  - Embedded question ID in message footer for recovery after restart
+  - Enhanced button handler to extract question ID from message data
+  - Ensures seamless user experience even after dyno restarts
+
+---
+
 ## [v2.1.0] - 2026-02-05
 
 ### Added
