@@ -105,12 +105,12 @@ class QuestionView(discord.ui.View):
         super().__init__(timeout=None)
         self.question_id = question_id
 
-    @discord.ui.button(label="✍️ Answer Secretly", style=discord.ButtonStyle.blurple)
+    @discord.ui.button(label="✍️ Answer Secretly", style=discord.ButtonStyle.blurple, custom_id="ans_btn")
     async def answer_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Extract question_id from message or use stored one
         question_id = self.question_id
         if not question_id and interaction.message:
-            # Try to extract from embed footer or message content
+            # Try to extract from embed footer
             for embed in interaction.message.embeds:
                 if embed.footer and embed.footer.text:
                     question_id = embed.footer.text.split("ID: ")[-1] if "ID: " in embed.footer.text else None
@@ -1642,6 +1642,7 @@ async def trigger_random_dare():
         color=discord.Color.random()
     )
     embed.add_field(name="Reward", value=f"💰 {price} Us-Bucks")
+    embed.set_footer(text=f"DARE: {dare_id} | 0 | 0 | {price}")
     
     await channel.send(embed=embed, view=DarePendingView(dare_id, 0, price))
 

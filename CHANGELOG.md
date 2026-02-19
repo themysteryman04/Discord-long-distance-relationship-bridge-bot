@@ -17,24 +17,13 @@ All notable changes to the Echo Bot will be documented in this file.
   - Buttons remain functional across dyno restarts
 - **Moments Data Unpacking**: Fixed error in `get_random_moment()` that was missing the `source` column
   - Updated database query to include source field (SNAP/LOG)
-  - Ensures flashback command works properly with moment data
+  - Updated `flashback()` command to properly unpack 5-column tuple
 
 ### Technical Details
 - Modified all interactive View classes to accept optional parameters for recovery
 - Added footer-based metadata recovery pattern to all button handlers
 - Ensured all persistent views are registered during `on_ready()` initialization
 - Database query consistency improvements for moments table
-
----
-
-## [v2.1.1] - 2026-02-12
-
-### Fixed
-- **Daily Question Button on Dyno Restart**: Fixed issue where the "Answer" button for daily questions stopped working after dyno restart
-  - Added `QuestionView` to persistent views in `on_ready()`
-  - Embedded question ID in message footer for recovery after restart
-  - Enhanced button handler to extract question ID from message data
-  - Ensures seamless user experience even after dyno restarts
 
 ---
 
