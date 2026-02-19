@@ -725,7 +725,7 @@ async def get(ctx, *, key: str):
 # =========================================
 
 class DareVerifyView(discord.ui.View):
-    def __init__(self, dare_id, challenger_id, victim_id, reward):
+    def __init__(self, dare_id=None, challenger_id=None, victim_id=None, reward=None):
         super().__init__(timeout=None)
         self.dare_id = dare_id
         self.challenger_id = challenger_id
@@ -734,6 +734,18 @@ class DareVerifyView(discord.ui.View):
 
     @discord.ui.button(label="💰 Verify & Pay", style=discord.ButtonStyle.success, custom_id="tod_verify")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Extract dare data from footer if None (after restart)
+        if self.dare_id is None and interaction.message:
+            for embed in interaction.message.embeds:
+                if embed.footer and "DARE:" in embed.footer.text:
+                    parts = embed.footer.text.split(" | ")
+                    if len(parts) >= 4:
+                        self.dare_id = parts[0].replace("DARE: ", "")
+                        self.challenger_id = int(parts[1])
+                        self.victim_id = int(parts[2])
+                        self.reward = int(parts[3])
+                    break
+        
         # AI/Bot challenges (ID 0) are auto-approved if user says they did it
         if self.challenger_id != 0 and interaction.user.id != self.challenger_id:
             await interaction.response.send_message("❌ Only the Challenger can approve payment!", ephemeral=True)
@@ -751,6 +763,18 @@ class DareVerifyView(discord.ui.View):
 
     @discord.ui.button(label="❌ Not Done Yet", style=discord.ButtonStyle.danger, custom_id="tod_reject")
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Extract dare data from footer if None (after restart)
+        if self.dare_id is None and interaction.message:
+            for embed in interaction.message.embeds:
+                if embed.footer and "DARE:" in embed.footer.text:
+                    parts = embed.footer.text.split(" | ")
+                    if len(parts) >= 4:
+                        self.dare_id = parts[0].replace("DARE: ", "")
+                        self.challenger_id = int(parts[1])
+                        self.victim_id = int(parts[2])
+                        self.reward = int(parts[3])
+                    break
+        
         if self.challenger_id != 0 and interaction.user.id != self.challenger_id:
             return
 
@@ -763,7 +787,7 @@ class DareVerifyView(discord.ui.View):
         await interaction.followup.send(f"⚠️ <@{self.victim_id}>, that didn't count! Try again.", ephemeral=False)
 
 class DareActiveView(discord.ui.View):
-    def __init__(self, dare_id, challenger_id, victim_id, reward):
+    def __init__(self, dare_id=None, challenger_id=None, victim_id=None, reward=None):
         super().__init__(timeout=None)
         self.dare_id = dare_id
         self.challenger_id = challenger_id
@@ -772,6 +796,18 @@ class DareActiveView(discord.ui.View):
 
     @discord.ui.button(label="✅ I Did It (Mark Done)", style=discord.ButtonStyle.primary, custom_id="tod_done")
     async def done_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Extract dare data from footer if None (after restart)
+        if self.dare_id is None and interaction.message:
+            for embed in interaction.message.embeds:
+                if embed.footer and "DARE:" in embed.footer.text:
+                    parts = embed.footer.text.split(" | ")
+                    if len(parts) >= 4:
+                        self.dare_id = parts[0].replace("DARE: ", "")
+                        self.challenger_id = int(parts[1])
+                        self.victim_id = int(parts[2])
+                        self.reward = int(parts[3])
+                    break
+        
         if interaction.user.id != self.victim_id:
             await interaction.response.send_message("❌ You aren't the one doing this dare!", ephemeral=True)
             return
@@ -803,7 +839,7 @@ class DareActiveView(discord.ui.View):
         await interaction.followup.send(f"🤖 Bot says: Good job! Sent you {self.reward} Us-Bucks.")
 
 class DarePendingView(discord.ui.View):
-    def __init__(self, dare_id, challenger_id, reward):
+    def __init__(self, dare_id=None, challenger_id=None, reward=None):
         super().__init__(timeout=None)
         self.dare_id = dare_id
         self.challenger_id = challenger_id
@@ -811,6 +847,17 @@ class DarePendingView(discord.ui.View):
 
     @discord.ui.button(label="😈 I Accept", style=discord.ButtonStyle.success, custom_id="tod_accept")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Extract dare data from footer if None (after restart)
+        if self.dare_id is None and interaction.message:
+            for embed in interaction.message.embeds:
+                if embed.footer and "DARE:" in embed.footer.text:
+                    parts = embed.footer.text.split(" | ")
+                    if len(parts) >= 4:
+                        self.dare_id = parts[0].replace("DARE: ", "")
+                        self.challenger_id = int(parts[1])
+                        self.reward = int(parts[3])
+                    break
+        
         if self.challenger_id != 0 and interaction.user.id == self.challenger_id:
             await interaction.response.send_message("❌ You can't accept your own dare!", ephemeral=True)
             return
@@ -820,6 +867,7 @@ class DarePendingView(discord.ui.View):
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.orange()
         embed.set_field_at(0, name="Status", value=f"🚧 **IN PROGRESS** by {interaction.user.mention}")
+        embed.set_footer(text=f"DARE: {self.dare_id} | {self.challenger_id} | {interaction.user.id} | {self.reward}")
         
         await interaction.response.edit_message(embed=embed, view=DareActiveView(self.dare_id, self.challenger_id, interaction.user.id, self.reward))
 
@@ -843,7 +891,7 @@ async def dare(ctx):
         color=discord.Color.dark_magenta()
     )
     embed.add_field(name="Status", value="🟡 Waiting for a victim...")
-    embed.set_footer(text=f"Challenged by {ctx.author.display_name}")
+    embed.set_footer(text=f"DARE: {dare_id} | {ctx.author.id} | 0 | {price}")
     
     await ctx.send(embed=embed, view=DarePendingView(dare_id, ctx.author.id, price))
 
@@ -1659,6 +1707,9 @@ async def on_ready():
     await database.init_db()
     bot.add_view(ShopView())
     bot.add_view(QuestionView(None))  # Persistent view for daily questions
+    bot.add_view(DarePendingView(None, None, None))  # Persistent view for dare challenges
+    bot.add_view(DareActiveView(None, None, None, None))  # Persistent view for active dares
+    bot.add_view(DareVerifyView(None, None, None, None))  # Persistent view for dare verification
     bot.scheduler = AsyncIOScheduler()
     
     # 1. Daily Question (9 AM MYT)

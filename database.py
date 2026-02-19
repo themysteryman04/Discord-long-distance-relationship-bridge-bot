@@ -258,7 +258,7 @@ async def get_random_moment():
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT user_id, caption, attachment_data, timestamp FROM moments ORDER BY RANDOM() LIMIT 1")
+            cur.execute("SELECT user_id, caption, attachment_data, timestamp, source FROM moments ORDER BY RANDOM() LIMIT 1")
             return cur.fetchone()
     finally:
         conn.close()
