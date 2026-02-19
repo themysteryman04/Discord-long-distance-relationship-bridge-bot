@@ -987,7 +987,7 @@ async def flashback(ctx):
         await ctx.send("📭 No memories found yet!")
         return
         
-    user_id, caption, attachment_data, timestamp = row
+    user_id, caption, attachment_data, timestamp, source = row
     
     image_url = None
     if attachment_data:
