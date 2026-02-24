@@ -91,14 +91,31 @@ class AnswerModal(discord.ui.Modal, title='Today\'s Question'):
         self.view_instance = view_instance
 
     async def on_submit(self, interaction: discord.Interaction):
-        await database.save_answer(
-            self.question_id, 
-            interaction.user.id, 
-            interaction.user.display_name, 
-            self.answer.value
-        )
-        await interaction.response.send_message("✅ Answer saved! Waiting for your partner...", ephemeral=True)
-        await self.view_instance.check_reveal(interaction.channel)
+        try:
+            print(f"📝 Answer submitted by {interaction.user.display_name} for question {self.question_id}")
+            await database.save_answer(
+                self.question_id, 
+                interaction.user.id, 
+                interaction.user.display_name, 
+                self.answer.value
+            )
+            print(f"✅ Answer saved to database")
+            
+            await interaction.response.send_message("✅ Answer saved! Waiting for your partner...", ephemeral=True)
+            
+            # Check if both answers are in and reveal to main channel
+            channel = bot.get_channel(config.CHANNELS["daily_question"])
+            print(f"🔗 Got channel: {channel} (ID: {config.CHANNELS['daily_question']})")
+            
+            if channel:
+                await self.view_instance.check_reveal(channel, self.question_id)
+            else:
+                print("❌ Could not get daily_question channel!")
+        except Exception as e:
+            print(f"❌ Error in answer submission: {e}")
+            import traceback
+            traceback.print_exc()
+            await interaction.response.send_message("❌ Error saving your answer. Please try again.", ephemeral=True)
 
 class QuestionView(discord.ui.View):
     def __init__(self, question_id=None):
@@ -107,30 +124,57 @@ class QuestionView(discord.ui.View):
 
     @discord.ui.button(label="✍️ Answer Secretly", style=discord.ButtonStyle.blurple, custom_id="ans_btn")
     async def answer_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Extract question_id from message or use stored one
-        question_id = self.question_id
-        if not question_id and interaction.message:
-            # Try to extract from embed footer
+        # ALWAYS extract question_id from embed footer (ignore self.question_id)
+        question_id = None
+        if interaction.message:
             for embed in interaction.message.embeds:
                 if embed.footer and embed.footer.text:
-                    question_id = embed.footer.text.split("ID: ")[-1] if "ID: " in embed.footer.text else None
+                    if "ID: " in embed.footer.text:
+                        question_id = embed.footer.text.split("ID: ")[-1].strip()
+        
+        print(f"🔍 Extracted question_id from footer: {question_id}")
         
         if not question_id:
             await interaction.response.send_message("❌ Question ID not found. Please try again.", ephemeral=True)
             return
+        
+        # Check if user already answered this question
+        existing_answers = await database.get_answers(question_id)
+        user_already_answered = any(answer[0] == interaction.user.display_name for answer in existing_answers)
+        
+        if user_already_answered:
+            await interaction.response.send_message("⚠️ You already answered this question! Your answer is locked in.", ephemeral=True)
+            return
+        
         await interaction.response.send_modal(AnswerModal(question_id, self))
 
-    async def check_reveal(self, channel):
-        answers = await database.get_answers(self.question_id)
-        if len(answers) >= 2:
-            embed = discord.Embed(
-                title="✨ Answers Revealed!", 
-                description="The Daily Question has been answered by both.",
-                color=discord.Color.gold()
-            )
-            for user, content in answers:
-                embed.add_field(name=f"👤 {user}", value=f"💬 {content}", inline=False)
-            await channel.send(embed=embed)
+    async def check_reveal(self, channel, question_id):
+        try:
+            print(f"🔍 DEBUG: Question ID passed: {question_id}")
+            answers = await database.get_answers(question_id)
+            print(f"🔍 DEBUG: Answers found: {len(answers)}")
+            print(f"🔍 DEBUG: Answers data: {answers}")
+            
+            if len(answers) >= 2:
+                embed = discord.Embed(
+                    title="✨ Answers Revealed!", 
+                    description="The Daily Question has been answered by both.",
+                    color=discord.Color.gold()
+                )
+                for user, content in answers:
+                    embed.add_field(name=f"👤 {user}", value=f"💬 {content}", inline=False)
+                
+                if channel:
+                    await channel.send(embed=embed)
+                    print(f"✅ Reveal sent to channel {channel.id}")
+                else:
+                    print("❌ Channel is None!")
+            else:
+                print(f"⏳ Only {len(answers)} answer(s) received, waiting for partner...")
+        except Exception as e:
+            print(f"❌ Error in check_reveal: {e}")
+            import traceback
+            traceback.print_exc()
             self.stop()
 
 async def send_daily_question():
@@ -1651,11 +1695,21 @@ async def schedule_todays_snaps():
     Runs every day at 9 AM (Malaysia Time) AND on Startup.
     Calculates the 3 snap times for each user based on THEIR local timezone.
     """
-    if not config.PLAYERS:
-        print("⚠️ No PLAYERS found in config.py.")
+    if not config.PLAYERS or not hasattr(bot, 'scheduler'):
+        print("⚠️ No PLAYERS found or scheduler not ready.")
         return
 
     print("📅 Scheduling Daily Snaps (Multi-Timezone)...")
+    
+    # CRITICAL FIX: Remove any existing snap jobs to prevent duplicates
+    jobs_to_remove = []
+    for job in bot.scheduler.get_jobs():
+        if job.func == trigger_snap_for_user:
+            jobs_to_remove.append(job.id)
+    
+    for job_id in jobs_to_remove:
+        bot.scheduler.remove_job(job_id)
+        print(f"   -> Cleared old snap job: {job_id}")
     
     for player in config.PLAYERS:
         p_id = player["id"]

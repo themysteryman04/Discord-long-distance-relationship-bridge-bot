@@ -2,6 +2,30 @@
 
 All notable changes to the Echo Bot will be documented in this file.
 
+## [v2.1.2] - 2026-02-25
+
+### Fixed
+- **Daily Question Answer Reveal Location**: Fixed answers not displaying publicly when both partners answered
+  - Changed reveal embed to send to #daily-question channel instead of private DM
+  - Answers now appear together in the public channel for both users to see
+  - Enhanced `check_reveal()` to properly target the correct channel
+- **Prevent Duplicate Question Answers**: Fixed ability to rewrite answers multiple times to the same daily question
+  - Added validation check in answer button to block users from answering twice
+  - User receives clear message: "You already answered this question! Your answer is locked in."
+  - Database maintains single answer per user per question using PRIMARY KEY constraint
+- **Moments Scheduling Duplication**: Fixed moments appearing more than 3 times per day due to duplicate job scheduling
+  - Added job cleanup logic to `schedule_todays_snaps()` to remove old snap jobs before scheduling new ones
+  - Bot now clears all existing snap jobs on each run to prevent accumulation across restarts
+  - Guarantees exactly 3 moments per person per day, even if bot restarts multiple times
+  - Duplicate snaps eliminated by clearing and re-scheduling each day
+- **Daily Question Persistent View Bug**: Fixed answers not saving/revealing with persistent button views
+  - Issue: Persistent `QuestionView(None)` was overriding individual question's `question_id`
+  - Solution: Now ALWAYS extract `question_id` from embed footer, never from `self.question_id`
+  - Button handler now reliably retrieves correct question ID from message even after restart
+  - Answers now properly save and reveal when both partners have answered the same question
+
+---
+
 ## [v2.1.1] - 2026-02-19
 
 ### Fixed
